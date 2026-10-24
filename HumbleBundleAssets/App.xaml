@@ -1,9 +1,23 @@
-﻿<Application x:Class="HumbleBundleAssets.App"
+<Application x:Class="HumbleBundleAssets.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:HumbleBundleAssets"
+             xmlns:converters="clr-namespace:HumbleBundleAssets.Converters"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-         
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/HumbleBundleAssets;component/Themes/DarkTheme.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- Converters -->
+            <BooleanToVisibilityConverter x:Key="BoolToVis" />
+            <converters:BooleanToVisibilityInvertedConverter x:Key="InverseBoolToVis" />
+            <converters:NullToVisibilityConverter x:Key="NullToVis" />
+            <converters:PreviewSupportBackgroundConverter x:Key="PreviewBgConverter" />
+            <converters:PreviewBadgeTextConverter x:Key="PreviewBadgeTextConverter" />
+            <converters:PreviewBadgeBackgroundConverter x:Key="PreviewBadgeBgConverter" />
+            <converters:PreviewBadgeForegroundConverter x:Key="PreviewBadgeFgConverter" />
+        </ResourceDictionary>
     </Application.Resources>
 </Application>
