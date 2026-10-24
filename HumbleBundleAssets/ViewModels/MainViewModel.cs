@@ -140,6 +140,22 @@ namespace HumbleBundleAssets.ViewModels
             set { _searchKeyword = value; OnPropertyChanged(); }
         }
 
+        public ObservableCollection<string> SearchModes { get; } = new()
+        {
+            "All",
+            "Words",
+            "Phrase",
+            "Any Word",
+            "Advanced"
+        };
+
+        private string _selectedSearchMode = "All";
+        public string SelectedSearchMode
+        {
+            get => _selectedSearchMode;
+            set { _selectedSearchMode = value; OnPropertyChanged(); }
+        }
+
         public ObservableCollection<string> Categories { get; } = new()
         {
             "All Categories",
@@ -182,7 +198,7 @@ namespace HumbleBundleAssets.ViewModels
             set { _minSizeText = value; OnPropertyChanged(); }
         }
 
-        public ObservableCollection<string> SizeUnits { get; } = new() { "KB", "MB" };
+        public ObservableCollection<string> SizeUnits { get; } = new() { "KB", "MB", "GB", "Bytes" };
 
         private string _minSizeUnit = "KB";
         public string MinSizeUnit
@@ -561,16 +577,34 @@ namespace HumbleBundleAssets.ViewModels
             FileTypes.Clear();
             FileTypes.Add("All");
 
-            IEnumerable<string> extensions = SelectedCategory switch
+            IEnumerable<string> extensions;
+            if (SelectedCategory == "All Categories")
             {
-                "Images" => new[] { ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".psd" },
-                "Audio" => new[] { ".wav", ".mp3", ".ogg", ".flac", ".aiff" },
-                "3D Models" => new[] { ".fbx", ".obj", ".blend", ".dae" },
-                "Fonts" => new[] { ".ttf", ".otf" },
-                "Text / Data" => new[] { ".txt", ".json", ".csv", ".md", ".cs", ".shader", ".xml", ".yaml", ".ini" },
-                "Unity Packages" => new[] { ".unitypackage" },
-                _ => CatalogService.SupportedExtensions.OrderBy(x => x)
-            };
+                var set = new HashSet<string>(CatalogService.SupportedExtensions, StringComparer.OrdinalIgnoreCase);
+                try
+                {
+                    foreach (var dbExt in _dbManager.GetDistinctFileTypes())
+                    {
+                        if (!string.IsNullOrWhiteSpace(dbExt))
+                            set.Add(AssetItem.NormalizeExtension(dbExt));
+                    }
+                }
+                catch { }
+                extensions = set.OrderBy(x => x);
+            }
+            else
+            {
+                extensions = SelectedCategory switch
+                {
+                    "Images" => new[] { ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".psd" },
+                    "Audio" => new[] { ".wav", ".mp3", ".ogg", ".flac", ".aiff" },
+                    "3D Models" => new[] { ".fbx", ".obj", ".blend", ".dae" },
+                    "Fonts" => new[] { ".ttf", ".otf" },
+                    "Text / Data" => new[] { ".txt", ".json", ".csv", ".md", ".cs", ".shader", ".xml", ".yaml", ".ini" },
+                    "Unity Packages" => new[] { ".unitypackage" },
+                    _ => CatalogService.SupportedExtensions.OrderBy(x => x)
+                };
+            }
 
             foreach (var ext in extensions)
             {
@@ -587,22 +621,44 @@ namespace HumbleBundleAssets.ViewModels
             }
         }
 
+        private static long ConvertToBytes(double value, string unit)
+        {
+            return unit switch
+            {
+                "Bytes" => (long)value,
+                "KB" => (long)(value * 1024),
+                "MB" => (long)(value * 1024 * 1024),
+                "GB" => (long)(value * 1024 * 1024 * 1024),
+                _ => (long)(value * 1024)
+            };
+        }
+
         private void ExecuteSearch()
         {
             long? minSizeBytes = null;
             if (double.TryParse(MinSizeText, out var minVal) && minVal > 0)
             {
-                minSizeBytes = (long)(minVal * (MinSizeUnit == "MB" ? 1024 * 1024 : 1024));
+                minSizeBytes = ConvertToBytes(minVal, MinSizeUnit);
             }
 
             long? maxSizeBytes = null;
             if (double.TryParse(MaxSizeText, out var maxVal) && maxVal > 0)
             {
-                maxSizeBytes = (long)(maxVal * (MaxSizeUnit == "MB" ? 1024 * 1024 : 1024));
+                maxSizeBytes = ConvertToBytes(maxVal, MaxSizeUnit);
             }
+
+            var searchMode = SelectedSearchMode switch
+            {
+                "Words" => SearchMode.Words,
+                "Phrase" => SearchMode.Phrase,
+                "Any Word" => SearchMode.AnyWord,
+                "Advanced" => SearchMode.Advanced,
+                _ => SearchMode.All
+            };
 
             var results = _dbManager.SearchAssets(
                 SearchKeyword,
+                searchMode,
                 SelectedCategory,
                 SelectedFileType,
                 minSizeBytes,
@@ -622,6 +678,7 @@ namespace HumbleBundleAssets.ViewModels
         private void ExecuteResetFilters()
         {
             SearchKeyword = string.Empty;
+            SelectedSearchMode = "All";
             SelectedCategory = "All Categories";
             SelectedFileType = "All";
             MinSizeText = string.Empty;

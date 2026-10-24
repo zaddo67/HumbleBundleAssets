@@ -227,8 +227,34 @@ namespace HumbleBundleAssets.Services
             return Convert.ToInt32(cmd.ExecuteScalar());
         }
 
+        public List<string> GetDistinctFileTypes()
+        {
+            var list = new List<string>();
+            using var conn = CreateConnection();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT DISTINCT FileType FROM Assets WHERE FileType IS NOT NULL AND FileType != '' ORDER BY FileType ASC;";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                list.Add(reader.GetString(0));
+            }
+            return list;
+        }
+
+        public List<AssetItem> SearchAssets(
+            string? keyword,
+            string? category,
+            string? fileType = null,
+            long? minSizeBytes = null,
+            long? maxSizeBytes = null,
+            int limit = 5000)
+        {
+            return SearchAssets(keyword, SearchMode.All, category, fileType, minSizeBytes, maxSizeBytes, limit);
+        }
+
         public List<AssetItem> SearchAssets(
             string? keyword = null,
+            SearchMode searchMode = SearchMode.All,
             string? category = null,
             string? fileType = null,
             long? minSizeBytes = null,
@@ -237,14 +263,24 @@ namespace HumbleBundleAssets.Services
         {
             var results = new List<AssetItem>();
             using var conn = CreateConnection();
+
+            conn.CreateFunction<string, string, string, string, bool>(
+                "MATCH_SEARCH",
+                (fileName, innerPath, q, m) =>
+                {
+                    var mode = Enum.TryParse<SearchMode>(m, out var parsed) ? parsed : SearchMode.All;
+                    return SearchMatcher.Matches(fileName, innerPath, q, mode);
+                });
+
             using var cmd = conn.CreateCommand();
 
             var sb = new StringBuilder("SELECT Id, FileName, FilePath, InnerPath, IsZipArchive, FileType, FileSize, DateModified FROM Assets WHERE 1=1 ");
 
             if (!string.IsNullOrWhiteSpace(keyword))
             {
-                sb.Append(" AND (FileName LIKE @keyword OR InnerPath LIKE @keyword) ");
-                cmd.Parameters.AddWithValue("@keyword", $"%{keyword.Trim()}%");
+                sb.Append(" AND MATCH_SEARCH(FileName, InnerPath, @keyword, @searchMode) = 1 ");
+                cmd.Parameters.AddWithValue("@keyword", keyword.Trim());
+                cmd.Parameters.AddWithValue("@searchMode", searchMode.ToString());
             }
 
             if (!string.IsNullOrWhiteSpace(fileType) && fileType != "All")

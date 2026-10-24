@@ -84,10 +84,11 @@ namespace HumbleBundleAssets.Services
                                 foreach (var subDir in Directory.EnumerateDirectories(currentDir))
                                 {
                                     if (cancellationToken.IsCancellationRequested) break;
-                                    // Skip hidden or system folders if needed
+                                    // Skip hidden, system, or __MACOSX folders
                                     var dirInfo = new DirectoryInfo(subDir);
                                     if (!dirInfo.Attributes.HasFlag(FileAttributes.Hidden) &&
-                                        !dirInfo.Attributes.HasFlag(FileAttributes.System))
+                                        !dirInfo.Attributes.HasFlag(FileAttributes.System) &&
+                                        !dirInfo.Name.Equals("__MACOSX", StringComparison.OrdinalIgnoreCase))
                                     {
                                         dirQueue.Enqueue(subDir);
                                     }
@@ -110,6 +111,13 @@ namespace HumbleBundleAssets.Services
                             foreach (var filePath in files)
                             {
                                 if (cancellationToken.IsCancellationRequested) break;
+
+                                // Skip __MACOSX paths or macOS shadow files
+                                if (filePath.Contains("__MACOSX", StringComparison.OrdinalIgnoreCase) ||
+                                    Path.GetFileName(filePath).StartsWith("._", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    continue;
+                                }
 
                                 totalProcessedFiles++;
                                 var ext = Path.GetExtension(filePath);
@@ -138,6 +146,13 @@ namespace HumbleBundleAssets.Services
 
                                             // Skip directories inside zip
                                             if (entry.FullName.EndsWith("/") || entry.FullName.EndsWith("\\") || string.IsNullOrEmpty(entry.Name))
+                                            {
+                                                continue;
+                                            }
+
+                                            // Exclude any entry containing __MACOSX directory or AppleDouble resource fork files
+                                            if (entry.FullName.Contains("__MACOSX", StringComparison.OrdinalIgnoreCase) ||
+                                                entry.Name.StartsWith("._", StringComparison.OrdinalIgnoreCase))
                                             {
                                                 continue;
                                             }

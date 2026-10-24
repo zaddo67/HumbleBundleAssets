@@ -122,6 +122,19 @@ namespace HumbleBundleAssets.Tests
                 {
                     writer.Write("exe");
                 }
+
+                // __MACOSX metadata entries (MUST be ignored)
+                var macEntry1 = archive.CreateEntry("__MACOSX/Audio/._music_theme.mp3");
+                using (var writer = new StreamWriter(macEntry1.Open()))
+                {
+                    writer.Write("mac metadata");
+                }
+
+                var macEntry2 = archive.CreateEntry("Models/__MACOSX/._sword.fbx");
+                using (var writer = new StreamWriter(macEntry2.Open()))
+                {
+                    writer.Write("mac metadata");
+                }
             }
 
             var catalogService = new CatalogService(_dbManager);
@@ -263,6 +276,111 @@ namespace HumbleBundleAssets.Tests
             thread.Join();
 
             Assert.Null(exception);
+        }
+
+        [Fact]
+        public void Dropdowns_ArePopulatedWithExpectedOptions()
+        {
+            var vm = new ViewModels.MainViewModel();
+
+            // Categories should be populated
+            Assert.NotEmpty(vm.Categories);
+            Assert.Contains("All Categories", vm.Categories);
+            Assert.Contains("Images", vm.Categories);
+            Assert.Contains("Audio", vm.Categories);
+            Assert.Contains("3D Models", vm.Categories);
+            Assert.Contains("Fonts", vm.Categories);
+            Assert.Contains("Text / Data", vm.Categories);
+            Assert.Contains("Unity Packages", vm.Categories);
+
+            // FileTypes should be populated
+            Assert.NotEmpty(vm.FileTypes);
+            Assert.Contains("All", vm.FileTypes);
+            Assert.Contains(".png", vm.FileTypes);
+            Assert.Contains(".wav", vm.FileTypes);
+
+            // Changing category updates FileTypes
+            vm.SelectedCategory = "Audio";
+            Assert.Contains(".mp3", vm.FileTypes);
+            Assert.Contains(".wav", vm.FileTypes);
+            Assert.DoesNotContain(".png", vm.FileTypes);
+
+            // SizeUnits should be populated
+            Assert.NotEmpty(vm.SizeUnits);
+            Assert.Contains("KB", vm.SizeUnits);
+            Assert.Contains("MB", vm.SizeUnits);
+            Assert.Contains("GB", vm.SizeUnits);
+            Assert.Contains("Bytes", vm.SizeUnits);
+
+            // SearchModes should be populated
+            Assert.NotEmpty(vm.SearchModes);
+            Assert.Contains("All", vm.SearchModes);
+            Assert.Contains("Words", vm.SearchModes);
+            Assert.Contains("Phrase", vm.SearchModes);
+            Assert.Contains("Any Word", vm.SearchModes);
+            Assert.Contains("Advanced", vm.SearchModes);
+        }
+
+        [Fact]
+        public void SearchMatcher_Modes_WorkAccurately()
+        {
+            // 1. Phrase mode: exact contiguous match
+            Assert.True(SearchMatcher.Matches("The Boy Toy Story.png", null, "Boy Toy", SearchMode.Phrase));
+            Assert.False(SearchMatcher.Matches("Boy has a toy dog.png", null, "Boy Toy", SearchMode.Phrase));
+
+            // 2. Words mode: whole word match (delimiters: space, _, -, numbers, symbols, CamelCase)
+            Assert.True(SearchMatcher.Matches("Boy has a toy dog.png", null, "Boy Toy", SearchMode.Words));
+            Assert.True(SearchMatcher.Matches("BoyToy_Walk01.png", null, "Boy Toy", SearchMode.Words));
+            Assert.True(SearchMatcher.Matches("boy-toy-run.wav", null, "Boy Toy", SearchMode.Words));
+            Assert.False(SearchMatcher.Matches("Samboy has a toy dog.png", null, "Boy Toy", SearchMode.Words));
+            Assert.False(SearchMatcher.Matches("cowboy_toy.png", null, "Boy Toy", SearchMode.Words));
+
+            // 3. All mode: all word fragments anywhere
+            Assert.True(SearchMatcher.Matches("Boy has a toy dog.png", null, "Boy Toy", SearchMode.All));
+            Assert.True(SearchMatcher.Matches("Samboy has a toy dog.png", null, "Boy Toy", SearchMode.All));
+            Assert.False(SearchMatcher.Matches("Samboy has a dog.png", null, "Boy Toy", SearchMode.All));
+
+            // 4. Any Word mode: OR
+            Assert.True(SearchMatcher.Matches("A lonely boy.png", null, "Boy Toy", SearchMode.AnyWord));
+            Assert.True(SearchMatcher.Matches("A small toy car.png", null, "Boy Toy", SearchMode.AnyWord));
+            Assert.False(SearchMatcher.Matches("A spaceship.png", null, "Boy Toy", SearchMode.AnyWord));
+
+            // 5. Advanced mode: wildcards & exclusions
+            Assert.True(SearchMatcher.Matches("sword_slash.png", null, "sword* -icon", SearchMode.Advanced));
+            Assert.False(SearchMatcher.Matches("sword_icon.png", null, "sword* -icon", SearchMode.Advanced));
+            Assert.True(SearchMatcher.Matches("char_1_walk.png", null, "char_?_walk", SearchMode.Advanced));
+            Assert.False(SearchMatcher.Matches("char_12_walk.png", null, "char_?_walk", SearchMode.Advanced));
+        }
+
+        [Fact]
+        public void DatabaseManager_SearchAssets_WithSearchModes_ReturnsFilteredResults()
+        {
+            var assets = new[]
+            {
+                new AssetItem { FileName = "BoyToy_Hero.png", FilePath = @"C:\a.png", FileType = ".png", FileSize = 100, DateModified = DateTime.Now },
+                new AssetItem { FileName = "Samboy_Toy.png", FilePath = @"C:\b.png", FileType = ".png", FileSize = 100, DateModified = DateTime.Now },
+                new AssetItem { FileName = "Boy has a toy dog.wav", FilePath = @"C:\c.wav", FileType = ".wav", FileSize = 100, DateModified = DateTime.Now },
+                new AssetItem { FileName = "sword_icon.png", FilePath = @"C:\d.png", FileType = ".png", FileSize = 100, DateModified = DateTime.Now },
+                new AssetItem { FileName = "sword_slash.png", FilePath = @"C:\e.png", FileType = ".png", FileSize = 100, DateModified = DateTime.Now }
+            };
+
+            _dbManager.InsertAssetsBatch(assets, @"C:\");
+
+            // Words mode: matches BoyToy_Hero and "Boy has a toy dog", but NOT Samboy_Toy
+            var wordResults = _dbManager.SearchAssets("Boy Toy", SearchMode.Words);
+            Assert.Equal(2, wordResults.Count);
+            Assert.Contains(wordResults, x => x.FileName == "BoyToy_Hero.png");
+            Assert.Contains(wordResults, x => x.FileName == "Boy has a toy dog.wav");
+            Assert.DoesNotContain(wordResults, x => x.FileName == "Samboy_Toy.png");
+
+            // All mode: matches all 3
+            var allResults = _dbManager.SearchAssets("Boy Toy", SearchMode.All);
+            Assert.Equal(3, allResults.Count);
+
+            // Advanced mode: sword* -icon
+            var advResults = _dbManager.SearchAssets("sword* -icon", SearchMode.Advanced);
+            Assert.Single(advResults);
+            Assert.Equal("sword_slash.png", advResults[0].FileName);
         }
     }
 }
